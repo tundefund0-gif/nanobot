@@ -1,95 +1,115 @@
 #!/data/data/com.termux/files/usr/bin/bash
 # ============================================================================
-# setup_termux_armv7.sh — Install NanoBot on 32-bit ARM Termux
+# NanoBot — Termux armv7 One-Click Setup
 #
-# This script installs build tools and compiles native dependencies from
-# source so NanoBot runs on armv7 (32-bit ARM) Android devices.
-#
-# Usage:  bash scripts/setup_termux_armv7.sh
+# Installs ALL dependencies on 32-bit ARM Termux with source compilation.
+# PyPI's manylinux wheels use glibc, which is incompatible with Android's
+# Bionic libc, so we compile everything from source.
 # ============================================================================
 set -euo pipefail
 
-echo "=============================================="
-echo " NanoBot — Termux armv7 Setup"
-echo "=============================================="
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
+info()  { echo -e "${GREEN}[INFO]${NC} $*"; }
+warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; }
+error() { echo -e "${RED}[ERROR]${NC} $*"; }
+
+NANOBOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$NANOBOT_DIR"
+
+info "=============================================="
+info " NanoBot — Termux armv7 Setup"
+info "=============================================="
 echo ""
 
-# ---- 1. Update packages ----
-echo "[1/5] Updating Termux packages..."
-yes | pkg update && yes | pkg upgrade
+# ---- 1. System packages ----
+info "[1/5] Installing Termux build tools..."
+yes 2>/dev/null | pkg update   || warn "pkg update failed (repos may be stale)"
+yes 2>/dev/null | pkg upgrade  || warn "pkg upgrade failed"
 
-# ---- 2. Install build tools ----
-echo "[2/5] Installing build tools (clang, Rust, make, cmake)..."
-yes | pkg install \
+# Core: Python + Git + build essentials
+yes 2>/dev/null | pkg install \
     python \
+    git \
     clang \
     make \
     cmake \
-    binutils \
-    rust \
     pkg-config \
+    binutils \
     libxml2 \
     libxslt \
     libffi \
     openssl \
-    git
+|| warn "Some system packages failed to install"
 
-# ---- 3. Install Rust (for pydantic-core & tiktoken) ----
-# pkg install rust above should handle this, but ensure cargo is available
-if ! command -v cargo &>/dev/null; then
-    echo "Rust (cargo) not found via pkg; installing via rustup..."
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-    source "$HOME/.cargo/env"
+# ---- 2. Rust (required for pydantic-core) ----
+info "[2/5] Installing Rust toolchain..."
+if command -v rustc &>/dev/null; then
+    info "Rust already installed (rustc $(rustc --version | cut -d' ' -f2))"
+else
+    # Try pkg first, fall back to rustup
+    yes 2>/dev/null | pkg install rust || {
+        info "Installing Rust via rustup (this may take a while)..."
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+        source "$HOME/.cargo/env"
+    }
 fi
 
-# Add armv7 Android target for cross-compilation within Rust crates
+# Optional: add Android target (needed for some Rust crates)
 rustup target add armv7-linux-androideabi 2>/dev/null || true
 
-# ---- 4. Install NanoBot ----
-echo "[4/5] Installing NanoBot with source compilation..."
+# ---- 3. pip configuration ----
+info "[3/5] Configuring pip for Termux..."
 
-cd "$(dirname "$0")/.."
+# On Termux, manylinux/musllinux wheels are incompatible with Android's
+# Bionic libc. We force source compilation which either:
+#   • Extracts .py files (pure-Python packages)  ✓
+#   • Compiles C extensions from source (clang)   ✓
+#   • Compiles Rust crates from source (cargo)    ✓
+mkdir -p "$HOME/.config/pip"
+cat > "$HOME/.config/pip/pip.conf" << 'PIPEOF'
+[global]
+# Never use pre-built manylinux/musllinux wheels — they link glibc/musl
+# which is incompatible with Termux's Bionic libc.
+no-binary = :all:
+# Respect standard Termux paths
+target = /data/data/com.termux/files/usr/lib/python3.13/site-packages
+PIPEOF
 
-# Install core dependencies, compiling native packages from source
-# --no-binary forces pip to compile wheels, which is required on armv7
-# since manylinux wheels use glibc (incompatible with Termux's Bionic libc)
-pip install \
-    --no-binary pydantic \
-    --no-binary dulwich \
-    --no-binary msgpack \
-    --no-binary websockets \
-    --no-binary pyyaml \
-    --no-binary cryptography \
-    --no-binary openpyxl \
-    -e ".[dev]"
+# ---- 4. Environment variables for pure-Python fallbacks ----
+# Force msgpack to use its pure-Python implementation (avoids C compilation)
+export MSGPACK_PUREPYTHON=1
+# PyYAML will fall back to pure Python if libyaml headers are missing
+# websockets/dulwich auto-fallback to pure Python when C ext unavailable
 
-# Optional: install tiktoken for precise token counting
-# (requires Rust compilation, may take a while)
-echo ""
-echo "  Optional: install tiktoken for accurate token counting?"
-echo "  (y/N)  "
-read -r INSTALL_TIKTOKEN
-if [[ "$INSTALL_TIKTOKEN" =~ ^[Yy] ]]; then
-    echo "Installing tiktoken (compiling from Rust source)..."
-    pip install --no-binary tiktoken "tiktoken>=0.12.0,<1.0.0"
-fi
+# ---- 5. Install NanoBot ----
+info "[4/5] Installing NanoBot and all dependencies..."
 
-# ---- 5. Verify ----
-echo "[5/5] Verifying installation..."
+# Clean install with --no-binary already set via pip.conf
+# pydantic-core (Rust) will compile via cargo — this takes ~10-30 min on armv7
+# dulwich was replaced with subprocess git calls — no compilation needed
+info "Compiling pydantic-core (Rust) — this may take 10-30 minutes..."
+pip install -e ".[dev]" 2>&1 | tail -20 || {
+    error "Main install failed. Trying without dev extras..."
+    pip install -e "." 2>&1 | tail -20
+}
+
+# ---- 6. Verify ----
+info "[5/5] Verifying installation..."
 python3 -c "
 from nanobot.cli.commands import app
 print('✓ NanoBot CLI loaded successfully')
 try:
-    import tiktoken
-    print('✓ tiktoken available (precise token counting)')
+    import tiktoken; print('✓ tiktoken available (precise token counting)')
 except ImportError:
-    print('✓ tiktoken not installed (char-based fallback active)')
-"
-
-echo ""
-echo "=============================================="
-echo " Setup complete!"
-echo ""
-echo " Run:  nanobot gateway"
-echo " Or:   nanobot --help"
-echo "=============================================="
+    print('✓ tiktoken optional (char-based fallback active)')
+" && {
+    info "=============================================="
+    info "  Setup complete!"
+    info ""
+    info "  Run:  nanobot gateway"
+    info "  Or:   nanobot --help"
+    info "=============================================="
+} || {
+    error "Verification failed. Check the errors above."
+    exit 1
+}

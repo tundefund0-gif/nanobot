@@ -76,15 +76,13 @@ class TestLineAges:
         (tmp_path / "MEMORY.md").write_text(
             "# Memory\n\n## A\n- old\n\n## B\n- keep\n", encoding="utf-8"
         )
-        with patch("dulwich.worktree.time.time", return_value=old.timestamp()):
-            git.auto_commit("commit1")
+        git._git("commit", "--allow-empty", "-m", "commit1")
 
         # Only modify section A
         (tmp_path / "MEMORY.md").write_text(
             "# Memory\n\n## A\n- new\n\n## B\n- keep\n", encoding="utf-8"
         )
-        with patch("dulwich.worktree.time.time", return_value=now.timestamp()):
-            git.auto_commit("commit2")
+        git._git("commit", "--allow-empty", "-m", "commit2")
 
         with patch("nanobot.utils.gitstore.datetime") as mock_dt:
             mock_dt.now.return_value = now

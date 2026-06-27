@@ -53,7 +53,7 @@ dependencies = [
     "openai>=2.8.0",
     "beautifulsoup4>=4.12.0,<5.0.0",  # replaces readability-lxml/lxml on armv7
     "jinja2>=3.1.0,<4.0.0",
-    "dulwich>=0.22.0,<1.0.0",
+
     "pyyaml>=6.0,<7.0.0",
     "pypdf>=5.0.0,<6.0.0",
     "python-docx>=1.1.0,<2.0.0",
