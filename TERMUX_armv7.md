@@ -82,3 +82,24 @@ nanobot gateway
 | `cryptography` | 5–15 min | Rust + C mixed |
 | `pycryptodome` | 2–5 min | C extensions |
 | All other packages | < 1 min each | Pure Python or small C extensions |
+
+---
+
+## Running on Alpine Linux instead
+
+Your 32-bit phone was running Alpine Linux 3.21 (not Termux).  
+For Alpine, use the dedicated setup script:
+
+```bash
+bash scripts/setup_alpine_armv7.sh
+```
+
+**Why Alpine needs special handling:**
+
+| Issue | Cause | Solution |
+|-------|-------|----------|
+| `manylinux` wheels | Use glibc, Alpine uses musl | Install `gcompat` for glibc compatibility |
+| `pydantic-core` (Rust) | Needs Rust ≥ 1.88, Alpine has 1.83 | Install Alpine's `py3-pydantic-core` package |
+| `jiter` / `rpds-py` (Rust crates) | Need `edition2024` (Rust ≥ 1.85) | Use manylinux wheel + patch `.so` for musl |
+
+The `setup_alpine_armv7.sh` script automates all of this.
